@@ -1,0 +1,626 @@
+export interface BilibiliDynamicDetailPayload {
+  code: number;
+  message: string;
+  ttl: number;
+  data: Data;
+}
+
+export interface Data {
+  item: Item;
+}
+
+export interface Item {
+  basic: Basic;
+  id_str: string;
+  modules: Module[] | Module;
+  orig?: DynamicOrigin;
+  type: number | "DYNAMIC_TYPE_FORWARD";
+}
+
+export interface Basic {
+  comment_id_str: string;
+  comment_type: number;
+  like_icon: LikeIcon;
+  rid_str: string;
+  title: string;
+  uid: number;
+}
+
+export interface LikeIcon {
+  action_url: string;
+  end_url: string;
+  id: number;
+  start_url: string;
+}
+
+export interface Module {
+  module_type?: string;
+  module_top?: ModuleTop;
+  module_title?: ModuleTitle;
+  module_author?: ModuleAuthor;
+  module_content?: ModuleContent;
+  module_stat?: ModuleStat;
+  module_dynamic?: ModuleDynamic;
+}
+
+export interface ModuleTitle {
+  text: string;
+}
+
+export interface ModuleTop {
+  display: Display;
+}
+
+export interface Display {
+  album: Album;
+  type: number;
+}
+
+export interface Album {
+  pics: Pic[];
+}
+
+export interface Pic {
+  aigc: any;
+  height: number;
+  live_url: any;
+  size: number;
+  url: string;
+  width: number;
+}
+
+export interface ModuleAuthor {
+  avatar: Avatar;
+  decorate_card: DecorateCard;
+  face: string;
+  face_nft: boolean;
+  following: boolean;
+  jump_url: string;
+  label: string;
+  mid: number;
+  more: More;
+  name: string;
+  official: Official;
+  pendant: Pendant;
+  pub_location_text: string;
+  pub_time: string;
+  pub_ts: number;
+  views_text: string;
+  vip: Vip;
+}
+
+export interface Avatar {
+  container_size: ContainerSize;
+  fallback_layers: FallbackLayers;
+  mid: string;
+}
+
+export interface ContainerSize {
+  height: number;
+  width: number;
+}
+
+export interface FallbackLayers {
+  is_critical_group: boolean;
+  layers: Layer[];
+}
+
+export interface Layer {
+  general_spec: GeneralSpec;
+  layer_config: LayerConfig;
+  resource: Resource;
+  visible: boolean;
+}
+
+export interface GeneralSpec {
+  pos_spec: PosSpec;
+  render_spec: RenderSpec;
+  size_spec: SizeSpec;
+}
+
+export interface PosSpec {
+  axis_x: number;
+  axis_y: number;
+  coordinate_pos: number;
+}
+
+export interface RenderSpec {
+  opacity: number;
+}
+
+export interface SizeSpec {
+  height: number;
+  width: number;
+}
+
+export interface LayerConfig {
+  is_critical?: boolean;
+  tags: Tags;
+}
+
+export interface Tags {
+  AVATAR_LAYER?: NonNullable<unknown>;
+  GENERAL_CFG?: GeneralCfg;
+  ICON_LAYER?: NonNullable<unknown>;
+}
+
+export interface GeneralCfg {
+  config_type: number;
+  general_config: GeneralConfig;
+}
+
+export interface GeneralConfig {
+  web_css_style: WebCssStyle;
+}
+
+export interface WebCssStyle {
+  borderRadius?: string;
+
+  [key: string]: any;
+}
+
+export interface Resource {
+  res_image: ResImage;
+  res_type: number;
+}
+
+export interface ResImage {
+  image_src: ImageSrc;
+}
+
+export interface ImageSrc {
+  placeholder?: number;
+  remote?: Remote;
+  src_type: number;
+  local?: number;
+}
+
+export interface Remote {
+  bfs_style: string;
+  url: string;
+}
+
+export interface DecorateCard {
+  big_card_url: string;
+  card_type: number;
+  card_type_name: string;
+  card_url: string;
+  fan: Fan;
+  id: number;
+  image_enhance: string;
+  item_id: number;
+  item_type: number;
+  jump_url: string;
+  name: string;
+}
+
+export interface Fan {
+  color: string;
+  color_format: ColorFormat;
+  is_fan: number;
+  name: string;
+  num_desc: string;
+  number: number;
+}
+
+export interface ColorFormat {
+  colors: string[];
+  end_point: string;
+  gradients: number[];
+  start_point: string;
+}
+
+export interface More {
+  three_point_items: ThreePointItem[];
+}
+
+export interface ThreePointItem {
+  label: string;
+  type: string;
+}
+
+export interface Official {
+  desc: string;
+  role: number;
+  title: string;
+  type: number;
+}
+
+export interface Pendant {
+  expire: number;
+  image: string;
+  image_enhance: string;
+  image_enhance_frame: string;
+  n_pid: number;
+  name: string;
+  pid: number;
+}
+
+export interface Vip {
+  avatar_icon: AvatarIcon;
+  avatar_subscript: number;
+  avatar_subscript_url: string;
+  due_date: number;
+  label: VipLabel;
+  nickname_color: string;
+  role: number;
+  status: number;
+  theme_type: number;
+  tv_due_date: number;
+  tv_vip_pay_type: number;
+  tv_vip_status: number;
+  type: number;
+  vip_pay_type: number;
+}
+
+export interface AvatarIcon {
+  icon_resource: NonNullable<unknown>;
+  icon_type: number;
+}
+
+export interface VipLabel {
+  bg_color: string;
+  bg_style: number;
+  border_color: string;
+  img_label_uri_hans: string;
+  img_label_uri_hans_static: string;
+  img_label_uri_hant: string;
+  img_label_uri_hant_static: string;
+  label_theme: string;
+  path: string;
+  text: string;
+  text_color: string;
+  use_img_label: boolean;
+}
+
+export interface ModuleContent {
+  paragraphs: Paragraph[];
+}
+
+export interface Paragraph {
+  align: number;
+  format: ParagraphFormat;
+  // 段落类型; 1: 文本; 2: 图片
+  para_type: 1 | 2;
+  text: ParagraphText;
+  pic?: {
+    pics?: ParagraphPicInfo[];
+  }
+}
+
+export interface ParagraphPicInfo {
+  aigc?: boolean;
+  height: number;
+  width: number;
+  live_url?: string;
+  size: number;
+  url: string;
+}
+
+export interface ParagraphFormat {
+  align: number;
+  indent: any;
+}
+
+export interface ParagraphText {
+  nodes: ParagraphNode[];
+}
+
+export type ParagraphNode = TextNode | RichNode;
+
+export interface TextNode {
+  type: "TEXT_NODE_TYPE_WORD";
+  word: Word;
+}
+
+export interface Word {
+  bg_style: BgStyle;
+  color: any;
+  font_level: string;
+  font_size: number;
+  style: any;
+  words: string;
+}
+
+export interface BgStyle {
+  color: NonNullable<unknown>;
+}
+
+export interface RichNode {
+  rich: Rich;
+  type: "TEXT_NODE_TYPE_RICH";
+}
+
+export interface Rich {
+  orig_text: string;
+  rid: string;
+  style: RichStyle;
+  text: string;
+  type: string;
+}
+
+export interface RichStyle {
+  font_level: string;
+  font_size: number;
+}
+
+export interface ModuleStat {
+  coin: StatItem;
+  comment: StatItemCount;
+  favorite: StatItemFavorite;
+  forward: StatItemCount;
+  like: StatItemLike;
+}
+
+export interface StatItem {
+  count: number;
+  forbidden: boolean;
+  hidden: boolean;
+}
+
+export interface StatItemCount {
+  count: number;
+  forbidden: boolean;
+}
+
+export interface StatItemFavorite {
+  count: number;
+  forbidden: boolean;
+  status: boolean;
+}
+
+export interface StatItemLike {
+  count: number;
+  forbidden: boolean;
+  status: boolean;
+}
+
+export interface ModuleDynamic {
+  additional: any | null;
+  desc: ModuleDynamicDesc;
+  major: any | null;
+  topic: any | null;
+}
+
+export interface ModuleDynamicDesc {
+  /** 富文本节点数组（文本、表情等） */
+  rich_text_nodes: RichTextNode[];
+
+  /** 节点展开后的完整文本 */
+  text: string;
+}
+
+export interface RichTextNode {
+  /** 节点类型：例如表情、文本等 */
+  type: RichTextNodeType;
+
+  /** 原始文本（例如 “[小电视_太太喜欢]”） */
+  orig_text?: string;
+
+  /** 展示文本 */
+  text?: string;
+
+  /** 如果是表情节点，则包含 emoji 信息 */
+  emoji?: EmojiInfo;
+}
+
+export type RichTextNodeType =
+  | "RICH_TEXT_NODE_TYPE_EMOJI"
+  | string; // 兼容其他类型节点
+
+export interface EmojiInfo {
+  icon_url: string;
+  size: number;
+  meta?: Record<string, any>; // 兼容额外字段（B站通常会有 extra 字段）
+}
+
+export interface DynamicOrigin {
+  basic: DynamicBasic;
+  id_str: string;
+  modules: DynamicModules;
+  type: string;
+  visible: boolean;
+}
+
+/** ---------------------------
+ * basic
+ * --------------------------*/
+export interface DynamicBasic {
+  comment_id_str: string;
+  comment_type: number;
+  like_icon: DynamicLikeIcon;
+  rid_str: string;
+}
+
+export interface DynamicLikeIcon {
+  action_url: string;
+  end_url: string;
+  id: number;
+  start_url: string;
+}
+
+/** ---------------------------
+ * modules
+ * --------------------------*/
+export interface DynamicModules {
+  module_author: DynamicAuthor;
+  module_dynamic: DynamicModuleDynamic;
+}
+
+/** ---------------------------
+ * module_author
+ * --------------------------*/
+export interface DynamicAuthor {
+  avatar: DynamicAvatar;
+  decorate: DynamicDecorate | null;
+  face: string;
+  face_nft: boolean;
+  following: boolean | null;
+  jump_url: string;
+  label: string;
+  mid: number;
+  name: string;
+  official_verify: DynamicOfficialVerify;
+  pendant: DynamicPendant;
+  pub_action: string;
+  pub_time: string;
+  pub_ts: number;
+  type: string;
+  vip: DynamicVip;
+}
+
+export interface DynamicAvatar {
+  container_size: {
+    height: number;
+    width: number;
+  };
+  fallback_layers: {
+    is_critical_group: boolean;
+    layers: DynamicAvatarLayer[];
+  };
+  mid: string;
+}
+
+export interface DynamicAvatarLayer {
+  general_spec: {
+    pos_spec: {
+      axis_x: number;
+      axis_y: number;
+      coordinate_pos: number;
+    };
+    render_spec: {
+      opacity: number;
+    };
+    size_spec: {
+      height: number;
+      width: number;
+    };
+  };
+  layer_config: {
+    is_critical: boolean;
+    tags: {
+      AVATAR_LAYER?: Record<string, any>;
+      GENERAL_CFG?: {
+        config_type: number;
+        general_config: {
+          web_css_style: {
+            borderRadius: string;
+          };
+        };
+      };
+    };
+  };
+  resource: {
+    res_image?: {
+      image_src: {
+        placeholder: number;
+        remote: {
+          bfs_style: string;
+          url: string;
+        };
+        src_type: number;
+      };
+    };
+    res_type: number;
+  };
+  visible: boolean;
+}
+
+/** 装扮信息（装扮卡 / 粉丝卡） */
+export interface DynamicDecorate {
+  card_url: string;
+  fan: {
+    color: string;
+    color_format: {
+      colors: string[];
+      end_point: string;
+      gradients: number[];
+      start_point: string;
+    };
+    is_fan: boolean;
+    num_prefix: string;
+    num_str: string;
+    number: number;
+  };
+  id: number;
+  jump_url: string;
+  name: string;
+  type: number;
+}
+
+export interface DynamicOfficialVerify {
+  desc: string;
+  type: number;
+}
+
+export interface DynamicPendant {
+  expire: number;
+  image: string;
+  image_enhance: string;
+  image_enhance_frame: string;
+  n_pid: number;
+  name: string;
+  pid: number;
+}
+
+export interface DynamicVip {
+  avatar_subscript: number;
+  avatar_subscript_url: string;
+  due_date: number;
+  label: {
+    bg_color: string;
+    bg_style: number;
+    border_color: string;
+    img_label_uri_hans: string;
+    img_label_uri_hans_static: string;
+    img_label_uri_hant: string;
+    img_label_uri_hant_static: string;
+    label_theme: string;
+    path: string;
+    text: string;
+    text_color: string;
+    use_img_label: boolean;
+  };
+  nickname_color: string;
+  status: number;
+  theme_type: number;
+  type: number;
+}
+
+/** ---------------------------
+ * module_dynamic
+ * --------------------------*/
+export interface DynamicModuleDynamic {
+  additional: any | null;
+  desc: any | null;
+  major: DynamicMajor | null;
+  topic: any | null;
+}
+
+/** major 内容（例如投稿视频） */
+export interface DynamicMajor {
+  archive?: DynamicArchive;
+  type: string;
+}
+
+export interface DynamicArchive {
+  aid: string;
+  badge: {
+    bg_color: string;
+    color: string;
+    icon_url: string | null;
+    text: string;
+  };
+  bvid: string;
+  cover: string;
+  desc: string;
+  disable_preview: number;
+  duration_text: string;
+  jump_url: string;
+  stat: {
+    danmaku: string;
+    play: string;
+  };
+  title: string;
+  type: number;
+}

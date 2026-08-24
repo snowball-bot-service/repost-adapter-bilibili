@@ -1,0 +1,673 @@
+import {FORMAT, Init, Inject, InjectClient, Logger, Provide, Scope, ScopeEnum} from "@midwayjs/core";
+import { HttpService, HttpServiceFactory } from "@midwayjs/axios";
+import { HelperManager } from "../helper/helper.manager.js";
+import { CanvasManager } from "../canvas/canvas.manager.js";
+import {
+  DynamicPayload,
+  LinkPayload,
+  LinkType,
+  LiveRoomRespBody,
+  LiveRoomResponse,
+  LiveRoomsResponse,
+  ParseToVideoicParams,
+  RoomInfo, UserBasicSearchPayload,
+  UserInfoCardParams,
+  UserInfoCardPayload,
+  VideoDownloadParams,
+  VideoicPayload,
+  VideoInfoParams,
+  VideoSnapshotParams
+} from "./bilibili.type";
+import qs from "qs";
+import { ErrorInfo } from "../helper/helper.type.js";
+import {
+  BilibiliDynamicDetailPayload,
+  Module,
+  ModuleAuthor,
+  ModuleContent,
+  ModuleStat
+} from "./bilibili-opus.type";
+import { ILogger } from "@midwayjs/logger";
+import { MosaicImageInfo } from "../canvas/canvas.type.js";
+import {
+  BilibiliVideoInfoPayload,
+  BilibiliVideoSnapshotPayload,
+  VideoDownloadInfoPayload
+} from "./bilibili-video.type";
+import { SharpManager } from "../sharp/sharp.manager.js";
+import { FFmpegManager } from "../ffmpeg/ffmpeg.manager.js";
+import linkify from "linkifyjs";
+
+@Provide()
+@Scope(ScopeEnum.Singleton)
+export class BilibiliManager {
+  @Inject()
+  private globalHttpService: HttpService;
+
+  @InjectClient(HttpServiceFactory, "bilibiliLiveApi")
+  public bilibiliLiveApi: HttpService;
+
+  @InjectClient(HttpServiceFactory, "bilibiliApi")
+  public bilibiliApi: HttpService;
+
+  @Inject()
+  private helper: HelperManager;
+
+  @Inject()
+  private sharpD: SharpManager;
+
+  @Inject()
+  private ffmpegD: FFmpegManager;
+
+  @Logger()
+  private logger: ILogger;
+
+  @Inject()
+  private canvasD: CanvasManager;
+
+  public urlsPrefix = {
+    b23: "b23.tv",
+    bilibili: "bilibili.com"
+  };
+
+  @Init()
+  onInit() {
+    this.bilibiliLiveApi.interceptors.response.use(response => {
+      if (response.data) return response.data;
+
+      return response;
+    });
+  }
+
+  /**
+   * 获取哔哩哔哩直播房间状态
+   * @return 成功返回负载，失败返回 null
+   * @param roomId
+   */
+  public async fetchLiveRoomInfo(roomId: string | number): Promise<LiveRoomRespBody | null> {
+    try {
+      const { code, data } = await this.bilibiliLiveApi.get<any, LiveRoomResponse>(
+        `/room/v1/Room/get_info`, {
+          params: {
+            room_id: roomId
+          }
+        });
+
+      // 不存在返回 null
+      if (code !== 0) return null;
+
+      return data;
+    } catch (e) {
+      console.error(e);
+      return null;
+    }
+  }
+
+  /**
+   * 检查消息是否存在 URL 前缀
+   * @param message
+   * @private
+   */
+  public isMessageContainsPrefix(message: string): boolean {
+    return this.helper.isMessageContainsPrefix(this.urlsPrefix, message);
+  }
+
+  /**
+   * 将 Bilibili 的分享链接消息解析成链接
+   * @param message
+   * @return 成功返回链接，失败返回 null
+   */
+  public async parseShareMessageToLink(message: string): Promise<LinkPayload | null> {
+    const directURL = this.helper.parseShareMessageToLink(this.urlsPrefix, message);
+
+    if (!directURL) return null;
+
+    return await this.urlParser(directURL);
+  }
+
+  /**
+   * 获取视频的基本信息
+   * @param params
+   */
+  public async fetchVideoInfo(
+    params: VideoInfoParams
+  ): Promise<[ErrorInfo, BilibiliVideoInfoPayload["data"]]> {
+    try {
+      const response = await this.bilibiliApi.get<BilibiliVideoInfoPayload>(
+        "/x/web-interface/wbi/view", {
+          params: params
+        });
+
+      if (!response || response.data.code !== 0) return [response.data.message || response.statusText, null];
+
+      return [null, response.data.data];
+    } catch (e) {
+      return [e, null];
+    }
+  }
+
+  /**
+   * 获取视频的快照信息
+   * @param params
+   */
+  public async fetchVideoSnapshot(
+    params: VideoSnapshotParams
+  ): Promise<[ErrorInfo, BilibiliVideoSnapshotPayload["data"]]> {
+    try {
+      const response = await this.bilibiliApi.get<BilibiliVideoSnapshotPayload>(
+        "/x/player/videoshot", {
+          params: params
+        });
+
+      if (!response || response.data.code !== 0) return [response.data.message || response.statusText, null];
+
+      return [null, response.data.data];
+    } catch (e) {
+      return [e, null];
+    }
+  }
+
+  /**
+   * 获取视频的下载信息
+   * @param params
+   */
+  public async fetchVideoDownloadInfo(
+    params: VideoDownloadParams
+  ): Promise<[ErrorInfo, VideoDownloadInfoPayload["data"]]> {
+    try {
+      const referer = `https://www.bilibili.com/video/${params.bvid || params.aid}/`;
+
+      const response = await this.bilibiliApi.get<VideoDownloadInfoPayload>(
+        "/x/player/playurl", {
+          params: params,
+          headers: {
+            referer
+          }
+        });
+
+      if (!response || response.data.code !== 0) return [response.data.message || response.statusText, null];
+
+      return [null, response.data.data];
+    } catch (e) {
+      return [e, null];
+    }
+  }
+
+  /**
+   * 获取动态的原始数据
+   * @param type
+   * @param id
+   */
+  public async fetchDynamicDetail(
+    type: LinkType, id: string
+  ): Promise<[ErrorInfo, BilibiliDynamicDetailPayload["data"]["item"]]> {
+    try {
+      const url = type === "opus"
+        ? "/x/polymer/web-dynamic/v1/opus/detail"
+        : "/x/polymer/web-dynamic/v1/detail";
+
+      const response = await this.bilibiliApi.get<BilibiliDynamicDetailPayload>(
+        url, {
+          params: {
+            id
+          }
+        });
+
+      if (!response || response.data.code !== 0) return [response.data.message || response.statusText, null];
+
+      return [null, response.data.data.item];
+    } catch (e) {
+      return [e, null];
+    }
+  }
+
+  /**
+   * 一步 | 获取到视频的数据流 (360P; MP4)
+   * @param bvid
+   * @param cid
+   * @param maxSecond
+   */
+  public async oneStepFetchVideoData(
+    bvid: string, cid: number, maxSecond?: number,
+  ): Promise<[ErrorInfo, Buffer]> {
+    try {
+      const [infoErr, infoPayload] = await this.fetchVideoDownloadInfo({
+        bvid, cid, platform: "html5", qn: 6,
+      });
+
+      if (infoErr) return [infoErr, null];
+
+      const downloadURL = infoPayload.durl.find(item => item.url).url;
+
+      const buffer = await this.ffmpegD.fetchMediaFromURL({
+        maxSecond,
+        url: downloadURL,
+        timeout: FORMAT.MS.ONE_MINUTE * 10,
+        httpService: this.bilibiliApi,
+        onProgress: (progress) => this.logger.debug("FFMpeg Progressing...", progress)
+      });
+
+      return [null, buffer];
+    } catch (e) {
+      this.logger.error(e);
+      return [e, null];
+    }
+  }
+
+  /**
+   * 一步 | 获取到视频的音频数据流 (MP3)
+   * @param bvid
+   * @param cid
+   * @param maxSecond
+   */
+  public async oneStepFetchAudioData(
+    bvid: string, cid: number, maxSecond?: number,
+  ): Promise<[ErrorInfo, Buffer]> {
+    try {
+      const [infoErr, infoPayload] = await this.fetchVideoDownloadInfo({
+        bvid, cid, platform: "pc", fnval: 16,
+      });
+
+      if (infoErr) return [infoErr, null];
+
+      const url = infoPayload.dash?.audio.find(item => item.baseUrl).baseUrl;
+
+      const m4sBuffer = await this.ffmpegD.fetchMediaFromURL({
+        maxSecond, url,
+        httpService: this.bilibiliApi,
+        onProgress: ({ percent }) => this.logger.debug("FFMpeg Progressing...", percent)
+      });
+
+      return [null, m4sBuffer];
+    } catch (e) {
+      return [e, null];
+    }
+  }
+
+  /**
+   * 将 B23 短链解析为跳转后的 URL
+   * @param b23Link
+   */
+  public async b23Parser(b23Link: string): Promise<string> {
+    try {
+      this.logger.debug("B23 Link", b23Link);
+      const response = await this.globalHttpService.get(b23Link);
+
+      this.logger.debug("Response", response.request);
+
+      // https://www.bilibili.com/opus/1135495237451382816?plat_id=187&share_from=dynamic&share_medium=android&share_plat=android&share_source=QQ&share_tag=s_i&spmid=dt.dt.0.0&timestamp=1763217453&unique_k=CX4bOi0
+      return response.request?.res?.responseUrl as string;
+    } catch (e) {
+      this.logger.error("Failed B23 Parser", new Error(e));
+      return null;
+    }
+  }
+
+  /**
+   * 哔哩哔哩相关 URL 解析, 也会进行 B23 短链接处理
+   * @param biliUrl
+   */
+  public async urlParser(biliUrl: string): Promise<LinkPayload> {
+    try {
+      // 如果链接为 b23 短链，则尝试解析
+      if (biliUrl.includes(this.urlsPrefix.b23)) biliUrl = await this.b23Parser(biliUrl);
+
+      const { host, pathname, searchParams } = new URL(biliUrl);
+
+      let type: LinkPayload["type"];
+      let id: string;
+
+      // video 转义
+      if (host.includes("bilibili.com") && pathname.startsWith("/video/")) {
+        type = "video";
+        id = pathname.split("/")[2];
+      }
+
+      // opus 动态转义
+      if (host.includes("bilibili.com") && pathname.startsWith("/opus/")) {
+        type = "opus";
+        id = pathname.split("/")[2];
+      }
+
+      // t 动态转义
+      if (host === "t.bilibili.com") {
+        type = "t";
+        id = pathname.split("/")[1];
+      }
+
+      return {
+        type, id, rawUrl: biliUrl
+      };
+    } catch (e) {
+      console.error(e);
+      return null;
+    }
+  }
+
+  /**
+   * 将 opus / t 动态转换成标准动态负载
+   * @param linkType
+   * @param raw
+   */
+  public async parseToDynamic(
+    linkType: LinkType,
+    raw: BilibiliDynamicDetailPayload["data"]["item"]
+  ): Promise<[ErrorInfo, DynamicPayload]> {
+    try {
+      const { modules: modules, id_str: idStr } = raw as BilibiliDynamicDetailPayload["data"]["item"];
+
+      // 通用返回信息
+      const result: DynamicPayload = {
+        type: linkType, id: idStr,
+
+        authorName: "/",
+        authorId: 0,
+        authorAvatarURL: "/",
+
+        pubAt: 0,
+
+        likesAmount: 0,
+        commentsAmount: 0,
+        forwardsAmount: 0,
+
+        text: "/",
+
+        imagesTotalSize: 0,
+        videosTotalSize: 0
+      };
+
+      // 处理动态状态信息
+      {
+        const statInfo: ModuleStat = linkType === "opus"
+          ? (modules as Module[]).find(module => "module_stat" in module)?.module_stat
+          : (modules as Module)?.module_stat;
+        const { comment, forward, like } = statInfo;
+        result.commentsAmount = comment.count;
+        result.forwardsAmount = forward.count;
+        result.likesAmount = like.count;
+      }
+
+      // 处理动态作者信息
+      {
+        const authorInfo: ModuleAuthor = linkType === "opus"
+          ? (modules as Module[]).find(module => "module_author" in module)?.module_author
+          : (modules as Module)?.module_author;
+        const { face: authorAvatarURL, name: authorName, mid: authorId, pub_ts: pubAt } = authorInfo;
+        result.authorAvatarURL = authorAvatarURL;
+        result.authorName = authorName;
+        result.authorId = authorId;
+        result.pubAt = pubAt * 1000; // 毫秒级
+      }
+
+      // opus 动态特殊处理
+      if (linkType === "opus") {
+        const modulesInner = modules as Module[];
+
+        // 检索标题信息
+        const titleInfo = modulesInner.find(module => "module_title" in module)?.module_title;
+        result.title = titleInfo?.text;
+
+        // 检索正文信息
+        const contentInfo = modulesInner.find(module => "module_content" in module)?.module_content;
+        result.text = this.opusExtractParagraphText(contentInfo);
+
+        // 检索动态图片资源
+        const [imagesInfo, imagesTotalSize] = this.opusExtractImages(modulesInner);
+        result.imagesTotalSize = imagesTotalSize / 1024; // B -> KB
+        result.imagesInfo = imagesInfo;
+      }
+
+      // t 动态特殊处理
+      if (linkType === "t") {
+        const modulesInner = modules as Module;
+
+        // 检索正文信息
+        const dynamicInfo = modulesInner?.module_dynamic;
+        result.text = dynamicInfo?.desc.text;
+      }
+
+      return [null, result];
+    } catch (e) {
+      return [e, null];
+    }
+  }
+
+  /**
+   * 将 video 转换成标准视频负载
+   * @param videoInfo
+   * @param params
+   */
+  public async parseToVideoic(
+    videoInfo: BilibiliVideoInfoPayload["data"],
+  ): Promise<[ErrorInfo, VideoicPayload]> {
+    try {
+      const {
+        bvid, pic: coverURL, cid, desc, title, duration, pubdate: pubAt, owner: authorInfo,
+        tname, tname_v2: tnameV2, stat: statInfo
+      } = videoInfo;
+      const { face: authorAvatarURL, name: authorName, mid: authorId } = authorInfo;
+      const { coin: coinAmount, like: likeAmount, view: viewAmount, favorite: favAmount } = statInfo;
+
+      const result: VideoicPayload = {
+        bvid, cid, desc, title,
+
+        authorAvatarURL, authorId, authorName,
+
+        coverURL, duration,
+
+        coinAmount, favAmount, likeAmount, viewAmount,
+
+        category: `${tname} · ${tnameV2}`,
+        pubAt: pubAt * 1000,
+      };
+
+      return [null, result];
+    } catch (e) {
+      return [e, null];
+    }
+  }
+
+  /**
+   * 生成视频快照
+   * @param bvid
+   * @param cid
+   * @param maxFrames 忽略表示所有帧
+   * @param duration
+   */
+  public async generateSnapshot(
+    bvid: string, cid: number, duration: number, maxFrames?: number
+  ): Promise<[MosaicImageInfo[], number]> {
+    const [snapshotErr, snapshotInfo] = await this.fetchVideoSnapshot({
+      bvid, cid
+    });
+
+    if (snapshotErr) {
+      this.logger.warn("Failed to fetch snapshot", snapshotErr);
+      return null;
+    }
+
+    const {
+      image: images,
+      img_x_size: imgSizeX, img_y_size: imgSizeY,
+      img_y_len: imgLenY, img_x_len: imgLenX
+    } = snapshotInfo;
+
+    const sprite = await this.helper.fetchToBuffer(`https:${images[0]}`, {
+      httpInstance: this.bilibiliApi,
+    });
+
+    const snapshotFrames = await this.sharpD.spriteToImages("buffer", sprite, {
+      imgLenX, imgLenY, imgSizeX, imgSizeY, maxFrames, duration,
+    });
+    const result = snapshotFrames.map(src => ({
+      src, height: imgSizeY, width: imgSizeX
+    }));
+
+    return [result, sprite.length];
+  }
+
+  /**
+   * 生成速览视频
+   * @param bvid
+   * @param cid
+   * @param maxSecond
+   */
+  public async generateVideoPreview(
+    bvid: string, cid: number, maxSecond = 60
+  ): Promise<[Buffer?, number?]> {
+    const [downloadErr, videoBuffer] = await this.oneStepFetchVideoData(bvid, cid, maxSecond);
+
+    if (downloadErr) {
+      this.logger.warn("Failed to fetch video preview", downloadErr);
+      return [null, 0];
+    }
+
+    return [videoBuffer, videoBuffer.length];
+  }
+
+  /**
+   * 生成速览音频
+   * @param bvid
+   * @param cid
+   * @param maxSecond
+   */
+  public async generateAudioPreview(
+    bvid: string, cid: number, maxSecond = 60
+  ): Promise<[Buffer, number]> {
+    const [downloadErr, buffer] = await this.oneStepFetchAudioData(bvid, cid, maxSecond);
+
+    if (downloadErr) {
+      this.logger.warn("Failed to fetch audio preview", downloadErr);
+      return [null, 0];
+    }
+
+    return [buffer, buffer.length];
+  }
+
+  /**
+   * 将 opus 动态的 text 转换成字符串
+   * @param data
+   * @private
+   */
+  private opusExtractParagraphText(data?: ModuleContent): string {
+    const result: string[] = [];
+
+    if (!data) return "";
+
+    for (const para of data.paragraphs) {
+      if (!para.text?.nodes) continue;
+
+      for (const node of para.text.nodes) {
+        switch (node.type) {
+          case "TEXT_NODE_TYPE_WORD":
+            if (node.word?.words) {
+              result.push(node.word.words);
+            }
+            break;
+
+          case "TEXT_NODE_TYPE_RICH":
+            if (node.rich?.text) {
+              result.push(node.rich.text);
+            }
+            break;
+
+          default:
+            break;
+        }
+      }
+    }
+
+    return result.join("");
+  }
+
+  /**
+   * 解析 opus 动态内的图片资源
+   * @param modules
+   *
+   * @return [图片最小负载列表 (没有或获取失败返回 null), 资源总和尺寸 (没有资源会返回0)]
+   * @private
+   */
+  private opusExtractImages(modules: Module[]): [MosaicImageInfo[] | null, number] {
+    try {
+      const result: MosaicImageInfo[] = [];
+
+      // 资源总尺寸
+      let totalSize = 0;
+
+      // 检索封面信息并遍历
+      const topInfo = modules.find(module => "module_top" in module)?.module_top;
+      topInfo?.display.album.pics.forEach(picture => {
+        const { size, url, width, height } = picture;
+
+        totalSize += size;
+        result.push({ src: url, height, width });
+      });
+
+      const contentInfo = modules.find(module => "module_content" in module)?.module_content;
+
+      // 筛选出图片资源段落并遍历
+      const pictureParas = contentInfo?.paragraphs.filter(para => para.para_type === 2);
+      pictureParas?.forEach(para => {
+        // 遍历每张图片
+        para.pic.pics.forEach((picture) => {
+          const { size, url, height, width } = picture;
+
+          totalSize += size;
+          result.push({ src: url, height, width });
+        });
+      });
+
+      // 没有资源返回 null
+      if (result.length === 0) return [null, 0];
+
+      return [result, totalSize];
+    } catch (e) {
+      this.logger.warn(new Error(e));
+      return [null, 0];
+    }
+  }
+
+  /**
+   * 获取用户信息卡片
+   * @param params
+   */
+  public async getUserInfoCard(
+    params: UserInfoCardParams
+  ): Promise<[ErrorInfo, UserInfoCardPayload["data"]]> {
+    try {
+      const response = await this.bilibiliApi.get<UserInfoCardPayload>(
+        "/x/web-interface/card", {
+          params: params
+        });
+
+      if (!response || response.data.code !== 0) return [response.data.message || response.statusText, null];
+
+      return [null, response.data.data];
+    } catch (e) {
+      return [e, null];
+    }
+  }
+
+  /**
+   * 通过用户名获取其ID
+   * @param names
+   */
+  public async searchUserNameToUid(
+    names: string
+  ): Promise<[ErrorInfo, UserBasicSearchPayload["data"]]> {
+    try {
+      const response = await this.bilibiliApi.get<UserBasicSearchPayload>(
+        "/x/polymer/web-dynamic/v1/name-to-uid", {
+          params: {
+            names,
+          }
+        });
+
+      if (!response || response.data.code !== 0) return [response.data.message || response.statusText, null];
+
+      return [null, response.data.data];
+    } catch (e) {
+      return [e, null];
+    }
+  }
+}
