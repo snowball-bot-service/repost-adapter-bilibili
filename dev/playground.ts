@@ -1,5 +1,6 @@
 import adapter from '../src';
 import { MockAdapterHost } from './harness';
+import { bilibiliFetchVideoDetailV2 } from '../src/utils/justone-api';
 
 async function main() {
   const host = new MockAdapterHost();
@@ -15,6 +16,10 @@ async function main() {
   }
 
   await host.dispose();
+
+  // const result = await bilibiliFetchVideoDetailV2("MadecARw1kPsfMvB", "BV1xx411c7mD");
+  // console.log(result);
+
 }
 
 main().catch((err) => {

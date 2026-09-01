@@ -12,6 +12,7 @@ import type { RepostExtraParams } from './type';
 import { FetchHandleDataFailedException, UnsupportedProcessException } from './utils/error';
 import { HttpManager } from './utils/http';
 import { fetchBiliTicket, videoFetchDownloadInfo, videoFetchSnapshot } from './utils/bilibili-api';
+import { bilibiliFetchVideoDetailV2 } from './utils/justone-api';
 
 export { HttpError, HttpManager } from './utils/http';
 export type {
@@ -101,7 +102,13 @@ async function continueHandleVideoRequest(
 ): Promise<AdapterRepostResponsePayload<RepostExtraParams>> {
   if (!http) throw new Error('Bilibili adapter has not been initialized');
 
-  const video = await fetchHandleDataFromAPI(http, handle);
+  const justOneApiToken = ctx.config<string>("justOneApiToken");
+  if (!justOneApiToken || handle.query.bvid) throw new Error('Bilibili adapter has not been initialized');
+
+  const video = await bilibiliFetchVideoDetailV2(justOneApiToken, handle.query.bvid!);
+
+  // const video = await fetchHandleDataFromAPI(http, handle);
+
   const category = [video.tname, video.tname_v2]
     .filter(
       (value, index, array) => Boolean(value) && array.indexOf(value) === index
