@@ -36,6 +36,12 @@ const CONST = {
 
 let http: HttpManager | null = null;
 
+let b23Http: HttpManager = new HttpManager({
+  baseUrl: "",
+  timeoutMs: 10000,
+  retries: 1,
+});
+
 const adapter: Adapter = {
   manifest: {
     name: 'repost-adapter-bilibili',
@@ -88,7 +94,7 @@ async function handleRepostRequest(
   if (!http) throw new Error('Bilibili adapter has not been initialized');
   ctx.logger.debug(`[${CONST.provider}] fetching ${req.source}`);
 
-  const handle = await extractHandleId(http, req.source);
+  const handle = await extractHandleId(b23Http, req.source);
 
   if (handle.type === "video") return continueHandleVideoRequest(req, ctx, handle);
 
@@ -103,9 +109,11 @@ async function continueHandleVideoRequest(
   if (!http) throw new Error('Bilibili adapter has not been initialized');
 
   const justOneApiToken = ctx.config<string>("justOneApiToken");
-  if (!justOneApiToken || handle.query.bvid) throw new Error('Bilibili adapter has not been initialized');
+  if (!justOneApiToken) throw new Error('JustOneApi has not been initialized');
 
-  const video = await bilibiliFetchVideoDetailV2(justOneApiToken, handle.query.bvid!);
+  if (!handle.query.bvid) throw new Error('BVid can not be empty');
+
+  const video = await bilibiliFetchVideoDetailV2(justOneApiToken, handle.query.bvid);
 
   // const video = await fetchHandleDataFromAPI(http, handle);
 
