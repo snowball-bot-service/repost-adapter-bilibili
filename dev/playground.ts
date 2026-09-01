@@ -17,7 +17,7 @@ async function main() {
 
   await host.dispose();
 
-  // const result = await bilibiliFetchVideoDetailV2("MadecARw1kPsfMvB", "BV1xx411c7mD");
+  // const result = await bilibiliFetchVideoDetailV2("", "BV1xx411c7mD");
   // console.log(result);
 
 }
