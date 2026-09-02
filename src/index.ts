@@ -36,7 +36,10 @@ const CONST = {
 
 let http: HttpManager | null = null;
 
-let b23Http: HttpManager = new HttpManager({
+/**
+ * 纯净 HTTP 客户端，无任何 inject
+ */
+let pureHttp: HttpManager = new HttpManager({
   baseUrl: "",
   timeoutMs: 10000,
   retries: 1,
@@ -94,11 +97,43 @@ async function handleRepostRequest(
   if (!http) throw new Error('Bilibili adapter has not been initialized');
   ctx.logger.debug(`[${CONST.provider}] fetching ${req.source}`);
 
-  const handle = await extractHandleId(b23Http, req.source);
+  const handle = await extractHandleId(pureHttp, req.source);
 
   if (handle.type === "video") return continueHandleVideoRequest(req, ctx, handle);
 
   throw new FetchHandleDataFailedException(handle.method, handle.id, "Unsupported Type");
+}
+
+async function _flowFetchSnapshotBuffer(
+  ctx: AdapterContext,
+  handle: BilibiliVideoHandle,
+  duration: number,
+) {
+  const {
+    image: snapshotImagesUrl,
+    img_x_size: imgXSize, img_y_size: imgYSize,
+    img_x_len: imgXLen, img_y_len: imgYLen,
+  } = await videoFetchSnapshot(http!, handle.query);
+
+  // url 拿到的是不含协议的裸 URI，eg. //bimp.hdslb.com/videoshotpvhdboss/39789659369_ku8x3b-0001.jpg
+  const snapshotRawResp = await pureHttp.request("GET", `https:${snapshotImagesUrl[0]}`);
+  const snapshotRawArrayBuffer = await snapshotRawResp.bytes();
+  const snapshotRawBuffer = Buffer.from(snapshotRawArrayBuffer);
+
+  ctx.logger.debug("RAW BUFFER", snapshotRawBuffer);
+
+  const frames = await ctx.helper.spriteToFrames("buffer", snapshotRawBuffer, {
+    imgLenX: imgXLen, imgLenY: imgYLen,
+    imgSizeX: imgXSize, imgSizeY: imgYSize,
+    duration: duration,
+  });
+
+  const gifBuffer = await ctx.helper.convertFramesToGIF({
+    frames: frames, frameRate: 2,
+  });
+
+  return gifBuffer ?? undefined;
+  // return undefined;
 }
 
 async function continueHandleVideoRequest(
@@ -113,9 +148,9 @@ async function continueHandleVideoRequest(
 
   if (!handle.query.bvid) throw new Error('BVid can not be empty');
 
-  const video = await bilibiliFetchVideoDetailV2(justOneApiToken, handle.query.bvid);
+  // const video = await bilibiliFetchVideoDetailV2(justOneApiToken, handle.query.bvid);
 
-  // const video = await fetchHandleDataFromAPI(http, handle);
+  const video = await fetchHandleDataFromAPI(http, handle);
 
   const category = [video.tname, video.tname_v2]
     .filter(
@@ -123,16 +158,7 @@ async function continueHandleVideoRequest(
     )
     .join(' · ');
 
-  // const {
-  //   image: snapshotImagesUrl,
-  //   img_x_size: snapshotXSize, img_y_size: snapshotYSize,
-  //   img_x_len: snapshotXLen, img_y_len: snapshotYLen,
-  // } = await videoFetchSnapshot(http, handle.query);
-  // const snapshotRawResp = await http.request("GET", snapshotImagesUrl[0]);
-  // const snapshotRawBuffer = await snapshotRawResp.arrayBuffer();
-  // await ctx.helper.spriteToFrames("buffer", snapshotRawBuffer, {
-  //
-  // });
+  const gifBuffer = await _flowFetchSnapshotBuffer(ctx, handle, video.duration);
 
   return {
     method: 'post',
@@ -150,12 +176,17 @@ async function continueHandleVideoRequest(
     title: video.title,
     content: video.desc,
     cover: video.pic,
+    overlayCoverBuffer: gifBuffer,
     badges: [
       [
         {
           emoji: '👀',
           name: ctx.helper.extraHumanable('播放', video.stat.view, '次'),
         },
+        { emoji: '⏱️', name: "时长 " + ctx.helper.humanableDuration(video.duration) },
+        ...(category ? [{ emoji: '🏷️', name: category }] : []),
+      ],
+      [
         {
           emoji: '👍',
           name: ctx.helper.extraHumanable('点赞', video.stat.like, '次'),
@@ -168,10 +199,6 @@ async function continueHandleVideoRequest(
           emoji: '⭐',
           name: ctx.helper.extraHumanable('收藏', video.stat.favorite, '次'),
         },
-      ],
-      [
-        { emoji: '⏱️', name: ctx.helper.humanableDuration(video.duration) },
-        ...(category ? [{ emoji: '🏷️', name: category }] : []),
       ],
     ],
     strawberry: {
