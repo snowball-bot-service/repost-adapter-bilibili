@@ -129,7 +129,7 @@ async function _flowFetchSnapshotBuffer(
   });
 
   const gifBuffer = await ctx.helper.convertFramesToGIF({
-    frames: frames, frameRate: 2,
+    frames: frames, frameRate: 1,
   });
 
   return gifBuffer ?? undefined;
