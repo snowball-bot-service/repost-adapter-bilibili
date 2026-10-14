@@ -109,6 +109,9 @@ async function _flowFetchSnapshotBuffer(
   handle: BilibiliVideoHandle,
   duration: number,
 ) {
+  const now = Date.now();
+  ctx.logger.info("NOW", now);
+
   const {
     image: snapshotImagesUrl,
     img_x_size: imgXSize, img_y_size: imgYSize,
@@ -122,15 +125,21 @@ async function _flowFetchSnapshotBuffer(
 
   ctx.logger.debug("RAW BUFFER", snapshotRawBuffer);
 
+  ctx.logger.info("RAW BUFFER", Date.now() - now);
+
   const frames = await ctx.helper.spriteToFrames("buffer", snapshotRawBuffer, {
     imgLenX: imgXLen, imgLenY: imgYLen,
     imgSizeX: imgXSize, imgSizeY: imgYSize,
     duration: duration,
   });
 
+  ctx.logger.info("frames", Date.now() - now);
+
   const gifBuffer = await ctx.helper.convertFramesToGIF({
     frames: frames, frameRate: 1,
   });
+
+  ctx.logger.info("gifBuffer", Date.now() - now);
 
   return gifBuffer ?? undefined;
   // return undefined;
@@ -158,7 +167,7 @@ async function continueHandleVideoRequest(
     )
     .join(' · ');
 
-  const gifBuffer = await _flowFetchSnapshotBuffer(ctx, handle, video.duration);
+  const gifBuffer = await _flowFetchSnapshotBuffer(ctx, handle, Math.min(120, video.duration));
 
   return {
     method: 'post',
