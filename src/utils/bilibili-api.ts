@@ -15,7 +15,18 @@ import {
 import type { RepostMethod } from '@snowball-bot/repost-adapter';
 import { BilibiliVideoHandle } from '../manager';
 import * as crypto from 'crypto';
-import { BiliTicketResponse } from '../bilibili/security.type';
+import { BiliBuvidResponse, BiliTicketResponse } from '../bilibili/security.type';
+import type {
+  BilibiliDynamicDetailPayload,
+  BilibiliDynamicItem,
+  BilibiliOpusDetailPayload,
+  BilibiliOpusItem,
+} from '../bilibili/dynamic.type';
+import { FetchDynamicDetailFailedException } from './error';
+
+/** 访问 B 站 Web 接口统一使用的 UA；缺失时部分接口会直接风控。 */
+export const BILIBILI_WEB_USER_AGENT =
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36';
 
 /** 获取公开视频详情，并将业务错误转换为适配器错误。 */
 export async function videoFetchInfo(
@@ -125,11 +136,92 @@ export async function fetchBiliTicket(csrf?: string): Promise<BiliTicketResponse
   const response = await fetch(`${url}?${params.toString()}`, {
     method: 'POST',
     headers: {
-      'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64; rv:109.0) Gecko/20100101 Firefox/115.0'
+      'User-Agent': BILIBILI_WEB_USER_AGENT
     }
   });
   if (!response.ok) {
     throw new Error(`HTTP error! status: ${response.status}`);
   }
   return response.json();
+}
+
+/**
+ * 获取 Web 端设备指纹 (buvid)
+ *
+ * 动态接口必须携带 `buvid3` Cookie，否则上游返回 -352 风控错误。
+ */
+export async function fetchBiliBuvid(): Promise<BiliBuvidResponse> {
+  const response = await fetch('https://api.bilibili.com/x/frontend/finger/spi', {
+    headers: {
+      'User-Agent': BILIBILI_WEB_USER_AGENT,
+      referer: 'https://www.bilibili.com/',
+    },
+  });
+  if (!response.ok) {
+    throw new Error(`HTTP error! status: ${response.status}`);
+  }
+  return response.json();
+}
+
+/**
+ * 获取通用动态详情（opus / t 均可命中）
+ *
+ * 使用 desktop 版接口：相比 `/x/polymer/web-dynamic/v1/detail`，它不需要 wbi 签名，
+ * 且 opus / t / 转发动态返回同一套 module 结构。
+ *
+ * @param http
+ * @param id 动态 ID
+ */
+export async function dynamicFetchDetail(
+  http: HttpManager,
+  id: string
+): Promise<BilibiliDynamicItem> {
+  const payload = await http.getJson<BilibiliDynamicDetailPayload>(
+    '/x/polymer/web-dynamic/desktop/v1/detail',
+    {
+      query: { id, timezone_offset: -480, platform: 'web', features: 'itemOpusStyle' },
+      headers: { referer: `https://t.bilibili.com/${id}` },
+    }
+  );
+
+  if (payload.code !== 0 || !payload.data?.item) {
+    throw new FetchDynamicDetailFailedException(
+      id,
+      payload.message || `Bilibili API returned code ${payload.code}`
+    );
+  }
+
+  return payload.data.item;
+}
+
+/**
+ * 获取图文动态 (opus) 详情
+ *
+ * 相比通用动态接口，它额外提供标题与完整的正文段落（文本 + 图片），
+ * 因此 `/opus/` 链接优先走这里。
+ *
+ * @param http
+ * @param id 动态 ID
+ * @return 命中返回 item；上游明确表示该 ID 不是 opus（data.item 缺失）时返回 null
+ */
+export async function opusFetchDetail(
+  http: HttpManager,
+  id: string
+): Promise<BilibiliOpusItem | null> {
+  const payload = await http.getJson<BilibiliOpusDetailPayload>(
+    '/x/polymer/web-dynamic/v1/opus/detail',
+    {
+      query: { id },
+      headers: { referer: `https://www.bilibili.com/opus/${id}` },
+    }
+  );
+
+  if (payload.code !== 0) {
+    throw new FetchDynamicDetailFailedException(
+      id,
+      payload.message || `Bilibili API returned code ${payload.code}`
+    );
+  }
+
+  return payload.data?.item ?? null;
 }

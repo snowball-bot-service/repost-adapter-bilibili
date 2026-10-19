@@ -8,6 +8,7 @@ import type {
   ProcessHandler,
   ProcessMethod,
   RepostHandler,
+  RepostMethod,
 } from '@snowball-bot/repost-adapter';
 
 /**
@@ -38,6 +39,9 @@ export class MockAdapterHost {
   private repostHandler: RepostHandler | null = null;
   private processHandler: ProcessHandler | null = null;
   private adapter: Adapter | null = null;
+
+  /** 模拟 core 的 KV 缓存（ticket / buvid 等） */
+  private readonly cache = new Map<string, { value: unknown; expiresAt?: Date }>();
 
   constructor(
     private readonly config: Record<string, unknown> = {}
@@ -107,7 +111,8 @@ export class MockAdapterHost {
    */
   async emitProcess(
     method: ProcessMethod,
-    source: string
+    source: string,
+    options: { repostMethod?: RepostMethod; extra?: unknown } = {}
   ): Promise<AdapterProcessResponsePayload | null> {
     if (!this.processHandler || !this.adapter) {
       throw new Error(
@@ -119,6 +124,8 @@ export class MockAdapterHost {
     const req: AdapterProcessRequestParams = {
       method,
       source,
+      repostMethod: options.repostMethod ?? 'post',
+      extra: options.extra,
       code: `dev-${Date.now()}`,
       requester: {
         userId: '-1',
@@ -174,7 +181,28 @@ export class MockAdapterHost {
             ? `${pad(hours)}:${pad(minutes)}:${pad(seconds)}`
             : `${pad(minutes)}:${pad(seconds)}`;
         },
-      },
+        cacheGet: async <R = string>(field: string, fallback?: R) => {
+          const hit = this.cache.get(field);
+          if (!hit) return fallback as R;
+          if (hit.expiresAt && hit.expiresAt.getTime() <= Date.now()) {
+            this.cache.delete(field);
+            return fallback as R;
+          }
+          return hit.value as R;
+        },
+        cacheSet: async <R = string>(field: string, value: R, expiresAt?: Date) => {
+          this.cache.set(field, { value, expiresAt });
+          return true;
+        },
+        spriteToFrames: async () => {
+          throw new Error('spriteToFrames is not implemented in MockAdapterHost');
+        },
+        convertFramesToGIF: async () => null,
+        videoExtractToFrames: async () => [],
+        fetchMediaFromURL: async () => {
+          throw new Error('fetchMediaFromURL is not implemented in MockAdapterHost');
+        },
+      } as AdapterContext['helper'],
       logger: {
         info: (msg, ...args) => console.log(`[info]`, msg, ...args),
         warn: (msg, ...args) => console.warn(`[warn]`, msg, ...args),

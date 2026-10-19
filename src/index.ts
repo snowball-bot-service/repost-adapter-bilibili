@@ -5,14 +5,29 @@ import type {
   AdapterProcessResponsePayload,
   AdapterRepostRequestParams,
   AdapterRepostResponsePayload,
+  BaseRepostAdapterResponsePayload,
+  RepostBadgeParams,
   SocialProvider,
 } from '@snowball-bot/repost-adapter';
-import { BilibiliVideoHandle, extractHandleId, fetchHandleDataFromAPI, getValidBilibiliTicket } from './manager';
+import {
+  BilibiliDynamicHandle,
+  BilibiliVideoHandle,
+  buildCredentialCookie,
+  extractHandleId,
+  fetchDynamicFromAPI,
+  fetchHandleDataFromAPI,
+  getValidBilibiliCredentials,
+} from './manager';
 import type { RepostExtraParams } from './type';
+import type { BilibiliDynamic } from './bilibili/dynamic.type';
 import { FetchHandleDataFailedException, UnsupportedProcessException } from './utils/error';
 import { HttpManager } from './utils/http';
-import { fetchBiliTicket, videoFetchDownloadInfo, videoFetchSnapshot } from './utils/bilibili-api';
-import { bilibiliFetchVideoDetailV2 } from './utils/justone-api';
+import {
+  BILIBILI_WEB_USER_AGENT,
+  videoFetchDownloadInfo,
+  videoFetchInfo,
+  videoFetchSnapshot,
+} from './utils/bilibili-api';
 
 export { HttpError, HttpManager } from './utils/http';
 export type {
@@ -25,7 +40,16 @@ export type {
   BilibiliVideoInfo,
   BilibiliVideoInfoPayload,
 } from './bilibili/video.type';
-export type { BilibiliDynamicDetailPayload } from './bilibili/dynamic.type';
+export type {
+  BilibiliDynamic,
+  BilibiliDynamicDetailPayload,
+  BilibiliDynamicImage,
+  BilibiliDynamicItem,
+  BilibiliDynamicKind,
+  BilibiliDynamicVideo,
+  BilibiliOpusDetailPayload,
+  BilibiliOpusItem,
+} from './bilibili/dynamic.type';
 
 const CONST = {
   provider: 'bilibili' as SocialProvider,
@@ -49,7 +73,7 @@ const adapter: Adapter = {
   manifest: {
     name: 'repost-adapter-bilibili',
     provider: CONST.provider,
-    whitelistHosts: ['bilibili.com', 'b23.tv'],
+    whitelistHosts: ['bilibili.com', 't.bilibili.com', 'b23.tv'],
     version: 1,
     author: 'Rominwolf',
     billing: { text: 100, token: 100, media: 1000, green: 1 },
@@ -66,18 +90,20 @@ const adapter: Adapter = {
     const timeout = ctx.config<number>("timeout");
     const headers = ctx.config<Record<string, string>>("headers");
 
+    // 动态接口要求携带 buvid3 Cookie，否则上游直接返回 -352 风控
+    const credentials = await getValidBilibiliCredentials(ctx);
+
     http = new HttpManager({
       baseUrl: baseURL || CONST.apiBaseURL,
       timeoutMs: timeout || CONST.apiTimeout,
       retries: CONST.apiRetries,
       headers: {
+        'User-Agent': BILIBILI_WEB_USER_AGENT,
         ...headers,
-        bili_ticket: await getValidBilibiliTicket(ctx),
+        cookie: buildCredentialCookie(credentials),
       },
       logger: ctx.logger,
     });
-
-    ctx.logger.info("BILI TICKET", await getValidBilibiliTicket(ctx));
 
     ctx.on('onRepostRequest', (req) => handleRepostRequest(req, ctx));
     ctx.on('onProcessRequest', (req) => handleProcessingRequest(req, ctx, {}));
@@ -100,6 +126,9 @@ async function handleRepostRequest(
   const handle = await extractHandleId(pureHttp, req.source);
 
   if (handle.type === "video") return continueHandleVideoRequest(req, ctx, handle);
+  if (handle.type === "opus" || handle.type === "t") {
+    return continueHandleDynamicRequest(req, ctx, handle);
+  }
 
   throw new FetchHandleDataFailedException(handle.method, handle.id, "Unsupported Type");
 }
@@ -152,12 +181,7 @@ async function continueHandleVideoRequest(
 ): Promise<AdapterRepostResponsePayload<RepostExtraParams>> {
   if (!http) throw new Error('Bilibili adapter has not been initialized');
 
-  const justOneApiToken = ctx.config<string>("justOneApiToken");
-  if (!justOneApiToken) throw new Error('JustOneApi has not been initialized');
-
   if (!handle.query.bvid) throw new Error('BVid can not be empty');
-
-  // const video = await bilibiliFetchVideoDetailV2(justOneApiToken, handle.query.bvid);
 
   const video = await fetchHandleDataFromAPI(http, handle);
 
@@ -218,6 +242,128 @@ async function continueHandleVideoRequest(
   };
 }
 
+/* -------------------------------------------------------------------------- */
+/* 动态                                                                        */
+/* -------------------------------------------------------------------------- */
+
+/** 动态互动数据徽章；源动态拿不到互动数据时整行省略 */
+function buildDynamicStatBadges(
+  ctx: AdapterContext,
+  dynamic: BilibiliDynamic
+): RepostBadgeParams[] | null {
+  const { like, comment, forward } = dynamic.stat;
+  if (!like && !comment && !forward) return null;
+
+  return [
+    { emoji: '👍', name: ctx.helper.extraHumanable('点赞', like, '次') },
+    { emoji: '💬', name: ctx.helper.extraHumanable('评论', comment, '条') },
+    { emoji: '🔁', name: ctx.helper.extraHumanable('转发', forward, '次') },
+  ];
+}
+
+/** 动态内容数据徽章（图片数量 / 内嵌视频信息） */
+function buildDynamicMediaBadges(
+  ctx: AdapterContext,
+  dynamic: BilibiliDynamic
+): RepostBadgeParams[] | null {
+  const badges: RepostBadgeParams[] = [];
+
+  if (dynamic.images.length) {
+    badges.push({
+      emoji: '🖼️',
+      name: ctx.helper.extraHumanable('图片', dynamic.images.length, '张'),
+    });
+  }
+
+  const { video } = dynamic;
+  if (video?.durationText) {
+    badges.push({ emoji: '⏱️', name: `时长 ${video.durationText}` });
+  }
+  if (video?.playText) {
+    badges.push({ emoji: '👀', name: `播放 ${video.playText}` });
+  }
+
+  return badges.length ? badges : null;
+}
+
+function buildDynamicBadges(
+  ctx: AdapterContext,
+  dynamic: BilibiliDynamic
+): RepostBadgeParams[][] {
+  return [
+    buildDynamicMediaBadges(ctx, dynamic),
+    buildDynamicStatBadges(ctx, dynamic),
+  ].filter((row): row is RepostBadgeParams[] => Boolean(row));
+}
+
+/** 将归一化动态投影为（子集）卡片负载 */
+function buildDynamicCard(
+  ctx: AdapterContext,
+  dynamic: BilibiliDynamic
+): BaseRepostAdapterResponsePayload {
+  const { video } = dynamic;
+
+  return {
+    method: 'post',
+    postId: dynamic.id,
+    ...(dynamic.publishAt ? { publishAt: new Date(dynamic.publishAt) } : {}),
+    author: {
+      userId: String(dynamic.author.mid),
+      nickname: dynamic.author.name,
+      headshotUrl: dynamic.author.face,
+    },
+    title: dynamic.title || video?.title,
+    // 内嵌视频的动态：正文为空时用视频简介兜底
+    content: dynamic.text || video?.desc || '',
+    cover: video?.cover,
+    images: dynamic.images.length
+      ? dynamic.images.map((image) => image.url)
+      : undefined,
+    badges: buildDynamicBadges(ctx, dynamic),
+  };
+}
+
+/** 取动态自身或其源动态中的内嵌视频 */
+function pickDynamicVideo(dynamic: BilibiliDynamic) {
+  return dynamic.video ?? dynamic.origin?.video;
+}
+
+async function continueHandleDynamicRequest(
+  req: AdapterRepostRequestParams,
+  ctx: AdapterContext,
+  handle: BilibiliDynamicHandle,
+): Promise<AdapterRepostResponsePayload<RepostExtraParams>> {
+  if (!http) throw new Error('Bilibili adapter has not been initialized');
+
+  const dynamic = await fetchDynamicFromAPI(http, handle);
+  const card = buildDynamicCard(ctx, dynamic);
+  const video = pickDynamicVideo(dynamic);
+
+  return {
+    ...card,
+    provider: CONST.provider,
+    code: req.code,
+    originalUrl: req.source,
+    requester: req.requester,
+    postId: dynamic.id || handle.id,
+    // 转发动态：源动态作为子集展示
+    child: dynamic.origin ? buildDynamicCard(ctx, dynamic.origin) : undefined,
+    ...(video?.bvid
+      ? { strawberry: { emoji: '🎞', feature: '原始视频' } }
+      : {}),
+    extra: {
+      type: handle.type,
+      dynamicId: dynamic.id || handle.id,
+      bvid: video?.bvid,
+      aid: video?.aid,
+    },
+  };
+}
+
+/* -------------------------------------------------------------------------- */
+/* 进程                                                                        */
+/* -------------------------------------------------------------------------- */
+
 async function handleProcessingRequest(
   req: AdapterProcessRequestParams,
   ctx: AdapterContext,
@@ -225,14 +371,26 @@ async function handleProcessingRequest(
 ): Promise<AdapterProcessResponsePayload | null> {
   const { logger } = ctx;
   const { method, source, requester, code, repostMethod, extra: _extra } = req;
-  const { bvid, aid, cid, type } = _extra as RepostExtraParams;
+  const { bvid, aid, cid } = (_extra ?? {}) as RepostExtraParams;
 
   logger.debug(`[${CONST.provider}] fetching ${method}: ${source}`);
 
-  // 获取原视频: 获取 Bilibili Video 原始视频
-  if (method === 'strawberry' && repostMethod === 'post' && type === "video") {
+  // 获取原视频: 视频稿件，以及内嵌视频的动态
+  if (method === 'strawberry' && repostMethod === 'post' && bvid) {
+    // 动态内嵌视频不带 cid，按 bvid 补齐
+    const videoCid =
+      cid ??
+      (
+        await videoFetchInfo(http!, {
+          method: 'post',
+          type: 'video',
+          id: bvid,
+          query: { bvid },
+        })
+      ).cid;
+
     const downloadInfo = await videoFetchDownloadInfo(http!, {
-      aid, bvid, cid,
+      aid, bvid, cid: videoCid,
       platform: "html5", qn: 6,
     });
 

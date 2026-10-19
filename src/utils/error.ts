@@ -49,6 +49,18 @@ export class FetchVideoDownloadInfoFailedException extends SnowballException {
 }
 
 /**
+ * 获取 Dynamic Detail 失败错误
+ */
+export class FetchDynamicDetailFailedException extends SnowballException {
+  constructor(
+    public readonly handleId: string,
+    public readonly msg: string,
+  ) {
+    super(`Fetch Dynamic Detail Failed Exception | Handle Id: ${handleId} | Message: ${msg}`);
+  }
+}
+
+/**
  * 不支持的类型错误
  */
 export class UnsupportedMethodException extends SnowballException {
