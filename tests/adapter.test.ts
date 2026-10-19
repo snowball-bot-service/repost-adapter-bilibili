@@ -404,7 +404,7 @@ describe('dynamic · opus', () => {
     expect(result).toMatchObject({
       method: 'post',
       postId: '1260561412356308994',
-      author: { userId: '341562854', nickname: 'TonyHSQ' },
+      author: { nickname: 'TonyHSQ' },
       extra: { type: 'opus', dynamicId: '1260561412356308994' },
     });
     // 网页节点取原文 URL，而非 “网页链接” 占位文案
@@ -415,11 +415,11 @@ describe('dynamic · opus', () => {
     ]);
     expect(result?.publishAt).toEqual(new Date(1_792_335_725 * 1000));
     expect(result?.badges?.flat().map((badge) => badge.emoji)).toEqual([
-      '🖼️',
       '👍',
       '💬',
       '🔁',
     ]);
+    expect(result?.author.userId).toBeUndefined();
     // 纯图文动态没有可下载的原视频
     expect(result?.strawberry).toBeUndefined();
   });
@@ -493,7 +493,7 @@ describe('dynamic · t', () => {
       title: '动态视频｜RTX Spark 笔记本',
       content: '电脑算是被重新发明了吗？',
       cover: 'https://i1.hdslb.com/archive.jpg',
-      author: { userId: '946974', nickname: '影视飓风' },
+      author: { nickname: '影视飓风' },
       strawberry: { emoji: '🎞', feature: '原始视频' },
       extra: {
         type: 't',
@@ -521,7 +521,6 @@ describe('dynamic · t', () => {
     expect(result).toMatchObject({
       postId: '1260730964793884787',
       content: '恭喜中奖，已私信通知。',
-      author: { userId: '1937308559' },
     });
     // 转发动态自身没有图片，图片挂在源动态上
     expect(result?.images).toBeUndefined();
@@ -535,6 +534,26 @@ describe('dynamic · t', () => {
       ],
     });
     expect(result?.strawberry).toBeUndefined();
+  });
+
+  it('promotes a single image to the cover instead of an image group', async () => {
+    const singleImagePayload = structuredClone(dynamicForwardPayload);
+    const origin =
+      singleImagePayload.data.item.modules[2].module_dynamic!.dyn_forward!.item;
+    const draw = origin.modules[2].module_dynamic!.dyn_draw!;
+    draw.items = draw.items.slice(0, 1);
+
+    mockFetchRoutes([['/desktop/v1/detail', singleImagePayload]]);
+    const { ctx, getRepostHandler } = createMockContext();
+    await adapter.initState(ctx);
+
+    const result = await getRepostHandler()({
+      ...request,
+      source: 'https://t.bilibili.com/1260730964793884787',
+    });
+
+    expect(result?.child?.cover).toBe('https://i0.hdslb.com/dyn/a.png');
+    expect(result?.child?.images).toBeUndefined();
   });
 
   it('rejects a t link without a dynamic id', async () => {

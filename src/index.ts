@@ -202,7 +202,6 @@ async function continueHandleVideoRequest(
     postId: video.bvid || handle.id,
     publishAt: new Date(video.pubdate * 1000),
     author: {
-      userId: String(video.owner.mid),
       nickname: video.owner.name,
       headshotUrl: video.owner.face,
     },
@@ -261,19 +260,11 @@ function buildDynamicStatBadges(
   ];
 }
 
-/** 动态内容数据徽章（图片数量 / 内嵌视频信息） */
+/** 动态内嵌视频徽章 */
 function buildDynamicMediaBadges(
-  ctx: AdapterContext,
   dynamic: BilibiliDynamic
 ): RepostBadgeParams[] | null {
   const badges: RepostBadgeParams[] = [];
-
-  if (dynamic.images.length) {
-    badges.push({
-      emoji: '🖼️',
-      name: ctx.helper.extraHumanable('图片', dynamic.images.length, '张'),
-    });
-  }
 
   const { video } = dynamic;
   if (video?.durationText) {
@@ -289,11 +280,13 @@ function buildDynamicMediaBadges(
 function buildDynamicBadges(
   ctx: AdapterContext,
   dynamic: BilibiliDynamic
-): RepostBadgeParams[][] {
-  return [
-    buildDynamicMediaBadges(ctx, dynamic),
+): RepostBadgeParams[][] | undefined {
+  const rows = [
+    buildDynamicMediaBadges(dynamic),
     buildDynamicStatBadges(ctx, dynamic),
   ].filter((row): row is RepostBadgeParams[] => Boolean(row));
+
+  return rows.length ? rows : undefined;
 }
 
 /** 将归一化动态投影为（子集）卡片负载 */
@@ -302,23 +295,24 @@ function buildDynamicCard(
   dynamic: BilibiliDynamic
 ): BaseRepostAdapterResponsePayload {
   const { video } = dynamic;
+  const imageUrls = dynamic.images.map((image) => image.url);
+
+  // 单图动态直接作为封面展示，避免渲染成只有一格的图片组
+  const useSingleImageAsCover = !video?.cover && imageUrls.length === 1;
 
   return {
     method: 'post',
     postId: dynamic.id,
     ...(dynamic.publishAt ? { publishAt: new Date(dynamic.publishAt) } : {}),
     author: {
-      userId: String(dynamic.author.mid),
       nickname: dynamic.author.name,
       headshotUrl: dynamic.author.face,
     },
     title: dynamic.title || video?.title,
     // 内嵌视频的动态：正文为空时用视频简介兜底
     content: dynamic.text || video?.desc || '',
-    cover: video?.cover,
-    images: dynamic.images.length
-      ? dynamic.images.map((image) => image.url)
-      : undefined,
+    cover: useSingleImageAsCover ? imageUrls[0] : video?.cover,
+    images: useSingleImageAsCover || !imageUrls.length ? undefined : imageUrls,
     badges: buildDynamicBadges(ctx, dynamic),
   };
 }
